@@ -8,6 +8,7 @@
 #include <linux/limits.h>
 
 #define MAX_LOGS 256
+#define HASH_LEN 65
 #define LOG_LINE 2048
 #define SUSPICIOUS_DENIED 5
 #define MAX_FILES_DENIED 25
@@ -26,15 +27,15 @@ typedef struct{
 	int uid; /* user id (positive integer) */
 	pid_t pid; /* process id (positive integer) */
 
-	char *file; /* filename (string) */
+	char file[PATH_MAX]; /* filename (string) */
 
-	time_t date; /* file access date - utc*/
-	time_t time; /* file access time - utc*/
+	char date[32]; /* file access date - utc*/
+	char time[32]; /* file access time - utc*/
 
 	int operation; /* access type values [0-3] */
 	int action_denied; /* is action denied values [0-1] */
 
-	char *filehash; /* file hash - sha256 - evp */
+	char filehash[HASH_LEN]; /* file hash - sha256 - evp */
 
 }log_entry;
 
@@ -42,14 +43,32 @@ typedef struct{
 int parse_log_file(FILE* log, log_entry* log_array){
 	int num=0;
 	char line[LOG_LINE];
+	char file_buf[PATH_MAX];
+	char date_buf[32];
+    char time_buf[32];
+    char hash_buf[128];
 
 	rewind(log);
 
 	while(fgets(line, sizeof(line), log)!=NULL){
-		int check = sscanf(line, "%d,%d,\"%s\",%s,%s,%d,%d,%s", log_array[num].uid,  log_array[num].pid,  log_array[num].file,  log_array[num].date,  log_array[num].time,  log_array[num].operation,  log_array[num].action_denied,  log_array[num].filehash);
+		int check = sscanf(line, "%d,%d,\"%[^\"]\",%[^,],%[^,],%d,%d,%s", 
+            &log_array[num].uid, 
+            &log_array[num].pid, 
+            file_buf,      // Read into temp buffer
+            date_buf,      // Read into temp buffer
+            time_buf,      // Read into temp buffer
+            &log_array[num].operation, 
+            &log_array[num].action_denied, 
+            hash_buf       // Read into temp buffer
+        );
 		if (check<8){
-			printf("Line #%d is malformed", &num);
+			printf("Line #%d is malformed, %d\n", num+1, check);
 		}
+		strcpy(log_array[num].file, file_buf);
+		strcpy(log_array[num].date, date_buf);
+		strcpy(log_array[num].time, time_buf);
+		strcpy(log_array[num].filehash, hash_buf);
+
 		num++;
 	}
 	return num;
@@ -79,25 +98,28 @@ list_unauthorized_accesses(FILE *log)
 	log_entry log_array[MAX_LOGS];
 	int num_of_Logs = parse_log_file(log, log_array);
 	User denied_users[MAX_USERS];
+	memset(denied_users, 0, sizeof(denied_users));
 	int current_denied_users=0;
 	int flag,exists=0;
 
-	for(int i = 0; i<=num_of_Logs;i++){
+	for(int i = 0; i < num_of_Logs;i++){
 		if(log_array[i].action_denied==1){
-			for(int j=0; j<=current_denied_users;j++){
+			for(int j=0; j< current_denied_users;j++){
 				if(denied_users[j].uid==log_array[i].uid){
 					exists = 1;
-					for(int z=0; z<=denied_users[j].num_denied;z++){
+					for(int z=0; z<denied_users[j].num_denied;z++){
 						if(strcmp(log_array[i].file, denied_users[j].files_denied[z])==0){
 							flag=1;
 							break;
 						}
 					}
-					if(flag = 0){
+					if(flag == 0){
 						denied_users[j].num_denied ++;
 						denied_users[j].files_denied[denied_users[j].num_denied-1]= log_array[i].file;
+						break;
 					}else{
 						flag=0;
+						break;
 					}
 				}
 			}
@@ -113,9 +135,9 @@ list_unauthorized_accesses(FILE *log)
 	}
 	
 	if(current_denied_users>0){
-		for(int i=0; i<=current_denied_users;i++){
+		for(int i=0; i<current_denied_users;i++){
 			if(denied_users[i].num_denied>SUSPICIOUS_DENIED){
-				printf("%d\n", &denied_users[i].uid);
+				printf("%d\n", denied_users[i].uid);
 			}
 		}
 	}
@@ -128,7 +150,7 @@ list_file_modifications(FILE *log, char *file_to_scan)
 {
 	log_entry log_array[MAX_LOGS];
 	int num_of_Logs = parse_log_file(log, log_array);
-	User user_list[MAX_USERS];
+	User user_list[MAX_USERS]={0};
 	int current_users=0;
 	int user_exists = 0;
 
@@ -183,7 +205,7 @@ main(int argc, char *argv[])
 	if (argc < 2)
 		usage();
 
-	log = fopen("./access_audit.log", "r");
+	log = fopen(LOG_FILE_PATH, "r");
 	if (log == NULL) {
 		printf("Error opening log file \"%s\"\n", "./access_audit.log");
 		return 1;
