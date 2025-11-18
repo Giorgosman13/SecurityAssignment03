@@ -1,0 +1,219 @@
+#define _POSIX_C_SOURCE 200809L
+
+#include <time.h>
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+#include <unistd.h>
+#include <linux/limits.h>
+
+#define MAX_LOGS 256
+#define LOG_LINE 2048
+#define SUSPICIOUS_DENIED 5
+#define MAX_FILES_DENIED 25
+#define MAX_USERS 256
+#define LOG_FILE_PATH "/tmp/access_audit.log" 
+
+typedef struct{
+	int uid;
+	int num_denied;
+	char* files_denied[MAX_FILES_DENIED];
+	int num_modify;
+}User;
+
+typedef struct{
+
+	int uid; /* user id (positive integer) */
+	pid_t pid; /* process id (positive integer) */
+
+	char *file; /* filename (string) */
+
+	time_t date; /* file access date - utc*/
+	time_t time; /* file access time - utc*/
+
+	int operation; /* access type values [0-3] */
+	int action_denied; /* is action denied values [0-1] */
+
+	char *filehash; /* file hash - sha256 - evp */
+
+}log_entry;
+
+//returns the number of logs put in the array in the 2nd parameter
+int parse_log_file(FILE* log, log_entry* log_array){
+	int num=0;
+	char line[LOG_LINE];
+
+	rewind(log);
+
+	while(fgets(line, sizeof(line), log)!=NULL){
+		int check = sscanf(line, "%d,%d,\"%s\",%s,%s,%d,%d,%s", log_array[num].uid,  log_array[num].pid,  log_array[num].file,  log_array[num].date,  log_array[num].time,  log_array[num].operation,  log_array[num].action_denied,  log_array[num].filehash);
+		if (check<8){
+			printf("Line #%d is malformed", &num);
+		}
+		num++;
+	}
+	return num;
+}
+
+void
+usage(void)
+{
+	printf(
+	       "\n"
+	       "usage:\n"
+	       "\t./audit_monitor \n"
+		   "Options:\n"
+		   "-s, Prints malicious users\n"
+		   "-i <filename>, Prints table of users that modified "
+		   "the file <filename> and the number of modifications\n"
+		   "-h, Help message\n\n"
+		   );
+
+	exit(1);
+}
+
+
+void 
+list_unauthorized_accesses(FILE *log)
+{
+	log_entry log_array[MAX_LOGS];
+	int num_of_Logs = parse_log_file(log, log_array);
+	User denied_users[MAX_USERS];
+	int current_denied_users=0;
+	int flag,exists=0;
+
+	for(int i = 0; i<=num_of_Logs;i++){
+		if(log_array[i].action_denied==1){
+			for(int j=0; j<=current_denied_users;j++){
+				if(denied_users[j].uid==log_array[i].uid){
+					exists = 1;
+					for(int z=0; z<=denied_users[j].num_denied;z++){
+						if(strcmp(log_array[i].file, denied_users[j].files_denied[z])==0){
+							flag=1;
+							break;
+						}
+					}
+					if(flag = 0){
+						denied_users[j].num_denied ++;
+						denied_users[j].files_denied[denied_users[j].num_denied-1]= log_array[i].file;
+					}else{
+						flag=0;
+					}
+				}
+			}
+			if(exists==0){
+				denied_users[current_denied_users].uid = log_array[i].uid;
+				denied_users[current_denied_users].num_denied =1;
+				denied_users[current_denied_users].files_denied[denied_users[current_denied_users].num_denied-1]= log_array[i].file;
+				current_denied_users++;
+			}else{
+				exists==0;
+			}
+		}
+	}
+	
+	if(current_denied_users>0){
+		for(int i=0; i<=current_denied_users;i++){
+			if(denied_users[i].num_denied>SUSPICIOUS_DENIED){
+				printf("%d\n", &denied_users[i].uid);
+			}
+		}
+	}
+	return;
+}
+
+
+void
+list_file_modifications(FILE *log, char *file_to_scan)
+{
+	log_entry log_array[MAX_LOGS];
+	int num_of_Logs = parse_log_file(log, log_array);
+	User user_list[MAX_USERS];
+	int current_users=0;
+	int user_exists = 0;
+
+	char absolute_path[PATH_MAX];
+	if(realpath(file_to_scan, absolute_path)==NULL){
+		strncpy(absolute_path, file_to_scan, PATH_MAX-1);
+		absolute_path[PATH_MAX]= '\0';
+	}
+	
+	for(int i=0; i<=num_of_Logs;i++){
+		if(strcmp(absolute_path, log_array[i].file)==0){
+			for(int j=0;j<=current_users;j++){
+				if(user_list[j].uid==log_array[i].uid){
+					user_exists=1;
+					if(log_array[i].operation==2){
+						user_list[j].num_modify++;
+					}
+					break;
+				}
+			}
+			if(user_exists==0){
+				user_list[current_users].uid= log_array[i].uid;
+				if(log_array[i].operation == 2){
+					user_list[current_users].num_modify = 1;
+				}else{
+					user_list[current_users].num_modify = 0;
+				}
+				current_users++;
+			}else{
+				user_exists=0;
+			}
+		}
+	}
+	if(current_users>0){
+		for(int i;i<=current_users;i++){
+			printf("Uid's || Num of accesses\n%d    ||%d\n",user_list[i].uid,user_list[i].num_modify);
+		}
+	}
+
+	return;
+
+}
+
+
+int 
+main(int argc, char *argv[])
+{
+
+	int ch;
+	FILE *log;
+
+	if (argc < 2)
+		usage();
+
+	log = fopen("./access_audit.log", "r");
+	if (log == NULL) {
+		printf("Error opening log file \"%s\"\n", "./access_audit.log");
+		return 1;
+	}
+
+	while ((ch = getopt(argc, argv, "hi:s")) != -1) {
+		switch (ch) {		
+		case 'i':
+			list_file_modifications(log, optarg);
+			break;
+		case 's':
+			list_unauthorized_accesses(log);
+			break;
+		default:
+			usage();
+		}
+
+	}
+
+
+	/* add your code here */
+	/* ... */
+	/* ... */
+	/* ... */
+	/* ... */
+
+
+	fclose(log);
+	argc -= optind;
+	argv += optind;	
+	
+	return 0;
+}
