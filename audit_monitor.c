@@ -5,6 +5,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <unistd.h>
+#include <libgen.h>
 #include <linux/limits.h>
 
 #define MAX_LOGS 256
@@ -150,19 +151,16 @@ list_file_modifications(FILE *log, char *file_to_scan)
 {
 	log_entry log_array[MAX_LOGS];
 	int num_of_Logs = parse_log_file(log, log_array);
-	User user_list[MAX_USERS]={0};
+	User user_list[MAX_USERS];
+	memset(user_list, 0, sizeof(user_list));
 	int current_users=0;
 	int user_exists = 0;
-
-	char absolute_path[PATH_MAX];
-	if(realpath(file_to_scan, absolute_path)==NULL){
-		strncpy(absolute_path, file_to_scan, PATH_MAX-1);
-		absolute_path[PATH_MAX]= '\0';
-	}
 	
-	for(int i=0; i<=num_of_Logs;i++){
-		if(strcmp(absolute_path, log_array[i].file)==0){
-			for(int j=0;j<=current_users;j++){
+	for(int i=0; i< num_of_Logs;i++){
+		char* filename = basename(strdup(log_array[i].file));
+		if(strcmp(file_to_scan, filename)==0 && log_array->action_denied ==0){
+			user_exists=0;
+			for(int j=0;j< current_users;j++){
 				if(user_list[j].uid==log_array[i].uid){
 					user_exists=1;
 					if(log_array[i].operation==2){
@@ -179,15 +177,16 @@ list_file_modifications(FILE *log, char *file_to_scan)
 					user_list[current_users].num_modify = 0;
 				}
 				current_users++;
-			}else{
-				user_exists=0;
-			}
+			}	
 		}
 	}
 	if(current_users>0){
-		for(int i;i<=current_users;i++){
-			printf("Uid's || Num of accesses\n%d    ||%d\n",user_list[i].uid,user_list[i].num_modify);
+		printf("Uid's || Num of accesses\n");
+		for(int i=0;i<current_users;i++){
+			printf("%d    ||%d\n",user_list[i].uid,user_list[i].num_modify);
 		}
+	}else {
+		printf("No mods found!!\n");
 	}
 
 	return;

@@ -16,22 +16,12 @@ int main()
 
 
 	/* example source code */
-
+    printf("\n--- 1. Creating files and then closing them ---\n");   
 	for (i = 0; i < 10; i++) {
-
 		file = fopen(filenames[i], "w+");
-		if (file == NULL) 
-			printf("fopen error\n");
-		else {
-			bytes = fwrite(filenames[i], strlen(filenames[i]), 1, file);
-			fclose(file);
-		}
-
+		fclose(file);
 	}
 
-
-	/* add your code here */
-/* --- 2. Open and modify under various conditions --- */
     printf("\n--- 2. Modifying files under various conditions ---\n");
 
     // Append to file_0
@@ -64,36 +54,29 @@ int main()
     printf("Attempting to write to '/root/protected_test.txt'...\n");
     file = fopen("/root/protected_test.txt", "w");
     if (file == NULL) {
-        printf("...Success (fopen failed as expected).\m");
+        printf("...Success (fopen failed as expected).\n");
     }
 
-    // c) Create a file and remove its permissions
-    printf("Attempting to access 'no_perms_file.txt'...\n");
-    file = fopen("no_perms_file.txt", "w");
-    if (file) {
-        fwrite("data", 1, 4, file);
-        fclose(file);
-        
-        // Remove all permissions (read/write/execute)
-        chmod("no_perms_file.txt", 0000); // Mode 000
-        printf("  (Set permissions for 'no_perms_file.txt' to 000)\n");
-
-        // Attempt to read (should be denied)
-        file = fopen("no_perms_file.txt", "r");
+    printf("Attempting a denied action 4 times to create a suspicious user\n");
+    char protected_files[6][64] = {
+        "/etc/shadow_denied_1",
+        "/etc/shadow_denied_2",
+        "/etc/shadow_denied_3",
+        "/root/secret_denied_4",
+        "/root/secret_denied_5",
+        "/proc/kcore_denied_6" // Total 6 unique denied accesses for the current user
+    };
+    for(int i=0 ; i<5 ; i++){
+        file = fopen(protected_files[i], "r");
         if (file == NULL) {
-            printf("...Success (read denied as expected).\n");
+            printf("...Success (fopen failed as expected).\n");
         }
-
-        // Clean up: restore permissions so we can delete it
-        chmod("no_perms_file.txt", 0644);
     }
-
     /* --- 4. Final Cleanup --- */
     printf("\n--- 4. Cleaning up test files ---\n");
     for (i = 0; i < 10; i++) {
         remove(filenames[i]);
     }
-    remove("no_perms_file.txt");
     printf("Test complete. Check '/tmp/access_audit.log'.\n");
 
     return 0;
